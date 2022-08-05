@@ -1,0 +1,64 @@
+version: '3.7'
+
+volumes:
+  static_volume:
+  local_postgres_data:
+  elastic:
+    driver: local
+
+services:
+  postgresdb:
+    image: postgres:12.0-alpine
+    build:
+      context: compose/postgres
+      dockerfile: Dockerfile
+    container_name: postgresdb
+    volumes:
+      - ./compose/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - local_postgres_data:/var/lib/postgresql/data:Z
+    env_file:
+      - .env
+    restart: always
+
+
+  django: &django
+    build:
+      context: .
+      dockerfile: compose/django/Dockerfile
+    container_name: django_api
+    depends_on:
+      - postgresdb
+    volumes:
+      - .:/app:rw # map data and files from parent directory in host to microservice directory in docker container
+      - static_volume:/usr/src/app/static
+      - /mnt/media:/usr/src/app/media
+    env_file:
+      - .env
+    command: make gunicorn-run
+    restart: always
+
+  tg_bot:
+    build:
+      context: .
+      dockerfile: compose/tg_bot/Dockerfile
+    container_name: tg_bot
+    depends_on:
+      - postgresdb
+    volumes:
+      - .:/usr/src/app/
+    command: make bot
+    env_file:
+      - .env
+
+  nginx:
+    build:
+      context: compose/nginx
+      dockerfile: Dockerfile
+    depends_on:
+      - django
+    ports:
+      - "8092:80"
+    volumes:
+      - static_volume:/usr/src/app/static
+      - /mnt/media:/usr/src/app/media
+    restart: "on-failure"
